@@ -7,6 +7,7 @@ import eu.decentsoftware.holograms.api.Settings;
 import eu.decentsoftware.holograms.api.actions.Action;
 import eu.decentsoftware.holograms.api.actions.ClickType;
 import eu.decentsoftware.holograms.api.holograms.enums.EnumFlag;
+import eu.decentsoftware.holograms.api.holograms.enums.VisibilityMode;
 import eu.decentsoftware.holograms.api.holograms.objects.UpdatingHologramObject;
 import eu.decentsoftware.holograms.api.utils.Log;
 import eu.decentsoftware.holograms.api.utils.config.FileConfig;
@@ -247,6 +248,7 @@ public class Hologram extends UpdatingHologramObject implements ITicked {
     protected final Set<UUID> hidePlayers = ConcurrentHashMap.newKeySet();
     protected final Set<UUID> showPlayers = ConcurrentHashMap.newKeySet();
     protected boolean defaultVisibleState = true;
+    protected final Map<UUID, VisibilityMode> visibilityModes = new ConcurrentHashMap<>();
     protected final List<HologramPage> pages = new ArrayList<>();
     protected boolean downOrigin = Settings.DEFAULT_DOWN_ORIGIN;
     protected boolean alwaysFacePlayer = false;
@@ -578,6 +580,7 @@ public class Hologram extends UpdatingHologramObject implements ITicked {
         removeShowPlayer(player);
         removeHidePlayer(player);
         viewerPages.remove(player.getUniqueId());
+        visibilityModes.remove(player.getUniqueId());
     }
 
     /*
@@ -657,6 +660,69 @@ public class Hologram extends UpdatingHologramObject implements ITicked {
     }
 
     /**
+     * Set the visibility mode for a specific player.
+     * This allows you to override the default visibility behavior.
+     *
+     * @param player The player.
+     * @param mode   The visibility mode.
+     * @see VisibilityMode
+     * @since 3.0.0
+     */
+    public void setVisibilityMode(@NonNull Player player, @NonNull VisibilityMode mode) {
+        UUID uuid = player.getUniqueId();
+        if (mode == VisibilityMode.DEFAULT) {
+            visibilityModes.remove(uuid);
+        } else {
+            visibilityModes.put(uuid, mode);
+        }
+
+        // Apply the new mode immediately
+        if (mode == VisibilityMode.FORCE_HIDDEN) {
+            hide(player);
+        } else if (mode == VisibilityMode.FORCE_VISIBLE) {
+            show(player, getPlayerPage(player));
+        }
+    }
+
+    /**
+     * Get the visibility mode for a specific player.
+     *
+     * @param player The player.
+     * @return The visibility mode, or DEFAULT if not set.
+     * @since 3.0.0
+     */
+    @NonNull
+    public VisibilityMode getVisibilityMode(@NonNull Player player) {
+        return visibilityModes.getOrDefault(player.getUniqueId(), VisibilityMode.DEFAULT);
+    }
+
+    /**
+     * Check if the hologram can be shown to the player based on visibility mode.
+     *
+     * @param player The player.
+     * @return True if the hologram can be shown, false otherwise.
+     * @since 3.0.0
+     */
+    private boolean canShowByVisibilityMode(@NonNull Player player) {
+        VisibilityMode mode = getVisibilityMode(player);
+        if (mode == VisibilityMode.FORCE_HIDDEN) {
+            return false;
+        }
+        return true;
+    }
+
+    /**
+     * Check if the hologram should ignore display range for the player.
+     *
+     * @param player The player.
+     * @return True if display range should be ignored, false otherwise.
+     * @since 3.0.0
+     */
+    private boolean shouldIgnoreDisplayRange(@NonNull Player player) {
+        return getVisibilityMode(player) == VisibilityMode.FORCE_VISIBLE;
+    }
+
+    /**
      * Show this hologram for given player on a given page.
      *
      * @param player    Given player.
@@ -667,8 +733,14 @@ public class Hologram extends UpdatingHologramObject implements ITicked {
             if (isDisabled() || isHideState(player) || (!isDefaultVisibleState() && !isShowState(player))) {
                 return false;
             }
+            // Check visibility mode
+            if (!canShowByVisibilityMode(player)) {
+                return false;
+            }
             HologramPage page = getPage(pageIndex);
-            if (page != null && page.size() > 0 && canShow(player) && isInDisplayRange(player)) {
+            // Allow showing if FORCE_VISIBLE mode is set, otherwise check display range
+            boolean inRange = shouldIgnoreDisplayRange(player) || isInDisplayRange(player);
+            if (page != null && page.size() > 0 && canShow(player) && inRange) {
                 // First hide the current page
                 HologramPage currentPage = getPage(player);
                 if (currentPage != null) {
